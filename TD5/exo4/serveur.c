@@ -1,16 +1,27 @@
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PORT 6000
 #define MAX_BUFFER 1000
+#define MAX_CLIENTS 3
 
 
-int main(int argc , char const *argv[]) {
+void getDateTime(char buffer[]) {
+    time_t t = time(NULL);
+    struct tm tm = *localtime(&t);
+
+    snprintf(buffer, MAX_BUFFER, "%d-%d-%d %d:%d:%d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
+
+int main(int argc, char const *argv[]) {
     int fdSocketAttente;
     int fdSocketCommunication;
     struct sockaddr_in coordonneesServeur;
@@ -18,6 +29,7 @@ int main(int argc , char const *argv[]) {
     char tampon[MAX_BUFFER];
     int nbRecu;
     int longueurAdresse;
+    int pid;
 
     fdSocketAttente = socket(PF_INET, SOCK_STREAM, 0);
 
@@ -46,33 +58,38 @@ int main(int argc , char const *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("En attente de connexion...\n");
-
     socklen_t tailleCoord = sizeof(coordonneesAppelant);
 
-    if ((fdSocketCommunication = accept(fdSocketAttente, (struct sockaddr *) &coordonneesAppelant,
-                                        &tailleCoord)) == -1) {
-        printf("erreur de accept\n");
-        exit(-1);
+    int nbClients = 0;
+
+    while (nbClients < MAX_CLIENTS) {
+        if ((fdSocketCommunication = accept(fdSocketAttente, (struct sockaddr *) &coordonneesAppelant,
+                                            &tailleCoord)) == -1) {
+            printf("erreur de accept\n");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Client connecté - %s:%d\n",
+               inet_ntoa(coordonneesAppelant.sin_addr),
+               ntohs(coordonneesAppelant.sin_port));
+
+        if ((pid = fork()) == 0) {
+            close(fdSocketAttente);
+
+            getDateTime(tampon);
+
+            // on envoie le message au client
+            send(fdSocketCommunication, tampon, strlen(tampon), 0);
+
+            exit(EXIT_SUCCESS);
+        }
+
+        nbClients++;
     }
-
-    printf("Client connecté\n");
-
-    // on attend le message du client
-    // la fonction recv est bloquante
-    nbRecu = recv(fdSocketCommunication, tampon, MAX_BUFFER, 0);
-
-    if (nbRecu > 0) {
-        tampon[nbRecu] = 0;
-        printf("Recu : %s\n", tampon);
-    }
-
-    strcpy(tampon, "Message renvoyé par le serveur vers le client !");
-    // on envoie le message au client
-    send(fdSocketCommunication, tampon, strlen(tampon), 0);
 
     close(fdSocketCommunication);
     close(fdSocketAttente);
 
+    printf("Fin du programme.\n");
     return EXIT_SUCCESS;
 }
